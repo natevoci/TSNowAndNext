@@ -167,7 +167,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 {
 	const float testPositionFilePercentage = 0.35f;
 
-	transport_packet* patPacket = ReadSection(file, 0, 0x10000, 0x00, 0x00);
+	transport_packet* patPacket = ReadSection(file, 0, 0x100000, 0x00, 0x00);
 	transport_packet* pmtPacket = NULL;
 	transport_packet* pcrPacket = NULL;
 	transport_packet* eitPacket = NULL;
@@ -186,7 +186,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	patTable = ParsePATTable(patPacket);
 	for (int i=0; i<patTable->programCount; i++)
 	{
-		pmtPacket = ReadSection(file, patPacket->FileOffset, 0x20000, patTable->programs[i].program_map_PID, 0x02);
+		pmtPacket = ReadSection(file, patPacket->FileOffset, 0x100000, patTable->programs[i].program_map_PID, 0x02);
 		if (pmtPacket != NULL)
 		{
 			service_id = patTable->programs[i].program_number;
