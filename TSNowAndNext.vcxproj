@@ -142,11 +142,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="functions.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="StdAfx.h" />
     <ClInclude Include="transport_packet.h" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="TSNowAndNext.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
