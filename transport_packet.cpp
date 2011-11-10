@@ -556,7 +556,7 @@ eit_event_list* ParseEITEvents(eit_table *pEITTable)
 
 			switch (descriptor_tag)
 			{
-			case 0x4D:
+			case 0x4D: // short_event_descriptor
 				{
 					if (ev->short_event_descriptor != NULL)
 						break;
@@ -588,6 +588,18 @@ eit_event_list* ParseEITEvents(eit_table *pEITTable)
 					memcpy(ev->short_event_descriptor->text, pName, length);
 				}
 				break;
+			case 0x4E: // extended_event_descriptor
+			case 0x54: // content_descriptor
+			case 0x55: // parental_rating_descriptor
+			case 0x76: // content_identifier_descriptor
+				{
+				}
+				break;
+			default:
+				{
+					descriptor_tag = descriptor_tag; // just a nothing line so i can put a breakpoint here to look for unknown descriptors
+				}
+				break;
 			}
 
 			pDesc += descriptor_length + 2;
@@ -608,6 +620,17 @@ eit_event_list* ParseEITEvents(eit_table *pEITTable)
 	pList->count = used;
 	pList->list = (eit_event *)malloc(sizeof(eit_event) * used);
 	memcpy(pList->list, events, sizeof(eit_event) * used);
+
+	for (; pList->indexOfRunningEvent < pList->count; pList->indexOfRunningEvent++)
+	{
+		if (pList->list[pList->indexOfRunningEvent].running_status == 4) // running
+		{
+			pList->running_event = &pList->list[pList->indexOfRunningEvent];
+			break;
+		}
+	}
+	if (pList->indexOfRunningEvent >= pList->count)
+		pList->indexOfRunningEvent = -1;
 
 	return pList;
 }

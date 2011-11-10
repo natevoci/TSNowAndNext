@@ -221,8 +221,6 @@ struct short_event_descriptor
 
 struct eit_event
 {
-	int ref_count;
-
 	WORD event_id;
 	FILETIME start_time_utc;
 	LONG duration_seconds;
@@ -240,6 +238,9 @@ struct eit_event_list
 
 	BYTE count;
 	eit_event *list;
+
+	BYTE indexOfRunningEvent;
+	eit_event *running_event;
 };
 
 void FreeTSPacketHeader(transport_packet_header* packet);

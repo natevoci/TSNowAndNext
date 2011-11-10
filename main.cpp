@@ -61,11 +61,11 @@ int main(int argc, char* argv[])
 	
 #ifdef _DEBUG
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChange.ts";
-	//printEvents = TRUE;
+	printEvents = TRUE;
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChangeOrig.ts";
 #endif
 
-	printf("TS file analyser - written by Nate\n\n");
+	printf("TSNowAndNext - written by Nate\n\n");
 	printf("opening %s\n\n", filename);
 
 	f = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_ARCHIVE, NULL);
@@ -203,6 +203,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 
 	pmtTable = ParsePMTTable(pmtPacket);
 
+	/* I'll put this back when I implement padding at the start and end. Until then it's not required
 	LONGLONG PCR_base;
 	pcrPacket = ReadPacket(file, 0, 0x20000, pmtTable->PCR_PID);
 	if (pcrPacket->adaption_field.PCR_flag == 1)
@@ -221,6 +222,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 				);
 	}
 	FreeTSPacket(pcrPacket);
+	*/
 
 	LONGLONG fileLength = getFileSize(file);
 	LONGLONG fileOffsetStart;
@@ -230,20 +232,40 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	printf("File Length %13llu\n", fileLength);
 
 	LONGLONG testPositionFileOffset = (LONGLONG)(fileLength * testPositionFilePercentage);
-	eitPacket = ReadEITSection(file, testPositionFileOffset, readSize, service_id, 0);
-	if (eitPacket == NULL)
-	{
-		printf("No EIT within 0x%.8x bytes\n", readSize);
-		return;
-	}
-	FreeEITTable(eitTable);
-	eitTable = ParseEITTable(eitPacket);
-	eit_event_list* event_list = ParseEITEvents(eitTable);
+	WORD event_id_of_show = 0;
+	eit_event_list* event_list = NULL;
 
-	WORD event_id_of_show = event_list->list[0].event_id;
+	while (TRUE) // loop until we find an EIT section with a running event, or no section
+	{
+		FreeTSPacket(eitPacket);
+		eitPacket = ReadEITSection(file, testPositionFileOffset, readSize, service_id);
+		if (eitPacket == NULL)
+		{
+			printf("No EIT within 0x%.8x bytes\n", readSize);
+			return;
+		}
+		FreeEITTable(eitTable);
+		eitTable = ParseEITTable(eitPacket);
+		FreeEITEventList(event_list);
+		event_list = ParseEITEvents(eitTable);
+
+		if (event_list->running_event != NULL)
+		{
+			event_id_of_show = event_list->running_event->event_id;
+			break;
+		}
+
+		// If we didn't find a running event then we'll try the next EIT packet
+		testPositionFileOffset = eitPacket->FileOffset + 188;
+	}
 
 	float percentage = eitPacket->FileOffset / (float)fileLength * 100.0f;
-	printf("Sample      %13llu %6.2f%% name=%.40s\n", eitPacket->FileOffset, percentage, event_list->list[0].short_event_descriptor->event_name);
+	char* eventName;
+	if ((event_list->running_event != NULL) && (event_list->running_event->short_event_descriptor != NULL))
+		eventName = event_list->running_event->short_event_descriptor->event_name;
+	else
+		eventName = "<Not Present>";
+	printf("Sample      %13llu %6.2f%% name=%.40s\n", eitPacket->FileOffset, percentage, eventName);
 
 	// Find Show Start
 	LONGLONG fileOffsetMin = 0;
@@ -253,18 +275,29 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	{
 		fileOffsetStart = (fileOffsetMin + fileOffsetMax) / 2;
 
-		FreeTSPacket(eitPacket);
-		eitPacket = ReadEITSection(file, fileOffsetStart, readSize, service_id, 0);
-		FreeEITTable(eitTable);
-		eitTable = ParseEITTable(eitPacket);
-		FreeEITEventList(event_list);
-		event_list = ParseEITEvents(eitTable);
+		while (TRUE) // loop until we find an EIT section with a running event, or no section
+		{
+			FreeTSPacket(eitPacket);
+			eitPacket = ReadEITSection(file, fileOffsetStart, readSize, service_id);
+			FreeEITTable(eitTable);
+			eitTable = ParseEITTable(eitPacket);
+			FreeEITEventList(event_list);
+			event_list = ParseEITEvents(eitTable);
 
-		if (eitPacket->FileOffset == fileOffsetMax)
+			if (event_list == NULL)
+				break;
+			if (event_list->running_event != NULL)
+				break;
+
+			// If we didn't find a running event then we'll try the next EIT packet
+			fileOffsetStart = eitPacket->FileOffset + 188;
+		}
+
+		if ((eitPacket == NULL) || (eitPacket->FileOffset == fileOffsetMax))
 		{
 			fileOffsetStart = fileOffsetMin;
 			FreeTSPacket(eitPacket);
-			eitPacket = ReadEITSection(file, fileOffsetStart, readSize, service_id, 0);
+			eitPacket = ReadEITSection(file, fileOffsetStart, readSize, service_id);
 			if (eitPacket->FileOffset != fileOffsetStart)
 			{
 				FreeTSPacket(eitPacket);
@@ -277,7 +310,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 			break;
 		}
 
-		if (event_list->list[0].event_id == event_id_of_show)
+		if (event_list->running_event->event_id == event_id_of_show)
 			fileOffsetMax = eitPacket->FileOffset;
 		else
 			fileOffsetMin = eitPacket->FileOffset;
@@ -286,7 +319,11 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	percentage = fileOffsetStart / (float)fileLength * 100.0f;
 	if (eitTable != NULL)
 	{
-		printf("Show Start  %13llu %6.2f%% name=%.40s\n", fileOffsetStart, percentage, event_list->list[0].short_event_descriptor->event_name);
+		if ((event_list->running_event != NULL) && (event_list->running_event->short_event_descriptor != NULL))
+			eventName = event_list->running_event->short_event_descriptor->event_name;
+		else
+			eventName = "<Not Present>";
+		printf("Show Start  %13llu %6.2f%% name=%.40s\n", fileOffsetStart, percentage, eventName);
 	}
 	else
 	{
@@ -301,12 +338,23 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	{
 		fileOffsetEnd = (fileOffsetMin + fileOffsetMax) / 2;
 
-		FreeTSPacket(eitPacket);
-		eitPacket = ReadEITSection(file, fileOffsetEnd, readSize, service_id, 0);
-		FreeEITTable(eitTable);
-		eitTable = ParseEITTable(eitPacket);
-		FreeEITEventList(event_list);
-		event_list = ParseEITEvents(eitTable);
+		while (TRUE) // loop until we find an EIT section with a running event, or no section
+		{
+			FreeTSPacket(eitPacket);
+			eitPacket = ReadEITSection(file, fileOffsetEnd, readSize, service_id);
+			FreeEITTable(eitTable);
+			eitTable = ParseEITTable(eitPacket);
+			FreeEITEventList(event_list);
+			event_list = ParseEITEvents(eitTable);
+
+			if (event_list == NULL)
+				break;
+			if (event_list->running_event != NULL)
+				break;
+
+			// If we didn't find a running event then we'll try the next EIT packet
+			fileOffsetEnd = eitPacket->FileOffset + 188;
+		}
 
 		if (eitTable == NULL)
 		{
@@ -318,7 +366,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 			(eitPacket->FileOffset == fileOffsetMax))
 			break;
 
-		if (event_list->list[0].event_id == event_id_of_show)
+		if (event_list->running_event->event_id == event_id_of_show)
 			fileOffsetMin = eitPacket->FileOffset;
 		else
 			fileOffsetMax = eitPacket->FileOffset;
@@ -327,7 +375,11 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 	percentage = fileOffsetEnd / (float)fileLength * 100.0f;
 	if (eitTable != NULL)
 	{
-		printf("Show End    %13llu %6.2f%% name=%.40s\n", fileOffsetEnd, percentage, event_list->list[0].short_event_descriptor->event_name);
+		if ((event_list->running_event != NULL) && (event_list->running_event->short_event_descriptor != NULL))
+			eventName = event_list->running_event->short_event_descriptor->event_name;
+		else
+			eventName = "<Not Present>";
+		printf("Show End    %13llu %6.2f%% name=%.40s\n", fileOffsetEnd, percentage, eventName);
 	}
 	else
 	{
@@ -343,7 +395,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 
 void ListNowAndNext(HANDLE file)
 {
-	transport_packet* patPacket = ReadSection(file, 0, 0x10000, 0x00, 0x00);
+	transport_packet* patPacket = ReadSection(file, 0, 0x100000, 0x00, 0x00);
 	transport_packet* pmtPacket = NULL;
 	transport_packet* pcrPacket = NULL;
 	transport_packet* eitPacket = NULL;
@@ -363,7 +415,7 @@ void ListNowAndNext(HANDLE file)
 	patTable = ParsePATTable(patPacket);
 	for (int i=0; i<patTable->programCount; i++)
 	{
-		pmtPacket = ReadSection(file, patPacket->FileOffset, 0x20000, patTable->programs[i].program_map_PID, 0x02);
+		pmtPacket = ReadSection(file, patPacket->FileOffset, 0x100000, patTable->programs[i].program_map_PID, 0x02);
 		if (pmtPacket != NULL)
 		{
 			service_id = patTable->programs[i].program_number;
@@ -380,7 +432,7 @@ void ListNowAndNext(HANDLE file)
 	pmtTable = ParsePMTTable(pmtPacket);
 
 	LONGLONG PCR_base;
-	pcrPacket = ReadPacket(file, 0, 0x20000, pmtTable->PCR_PID);
+	pcrPacket = ReadPacket(file, 0, 0x100000, pmtTable->PCR_PID);
 	if (pcrPacket->adaption_field.PCR_flag == 1)
 	{
 		LONGLONG PCR = pcrPacket->adaption_field.program_clock_reference_base * 300;
@@ -424,23 +476,39 @@ void ListNowAndNext(HANDLE file)
 		event_list = ParseEITEvents(eitTable);
 
 		BOOL print = FALSE;
-		if (eitTable->section_number == 0) // Now
+		if (event_list->running_event != NULL) // Now
 		{
-			if (event_id_now != event_list->list[0].event_id)
+			if (FALSE) // some debugging code to show packets missing short_event_descriptors
 			{
-				printf("NOW CHANGED\n");
-				event_id_now = event_list->list[0].event_id;
+				if (event_list->running_event->short_event_descriptor == NULL)
+					printf("0");
+				else
+					printf("1");
+			}
+
+			if (event_id_now != event_list->running_event->event_id)
+			{
+				printf("\nNOW CHANGED\n");
+				event_id_now = event_list->running_event->event_id;
 				print = TRUE;
 			}
 		}
-		else if (eitTable->section_number == 1) // Next
+		else // Next
 		{
-			if (event_id_next != event_list->list[0].event_id)
+			if (FALSE) // some debugging code to show packets missing short_event_descriptors
 			{
-				printf("NEXT CHANGED\n");
-				event_id_next = event_list->list[0].event_id;
-				print = TRUE;
+				if (event_list->list[0].short_event_descriptor == NULL)
+					printf("2");
+				else
+					printf("3");
 			}
+
+			//if (event_id_next != event_list->list[0].event_id)
+			//{
+			//	printf("\nNEXT CHANGED\n");
+			//	event_id_next = event_list->list[0].event_id;
+			//	print = TRUE;
+			//}
 		}
 
 		if (print)
