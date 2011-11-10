@@ -35,13 +35,23 @@ SHORT _patVersion = -1;
 transport_packet* _patPacket;
 transport_packet* _pmtPackets[0x2000];
 
+BOOL _printAF = FALSE;
+BOOL _printPES = FALSE;
+BOOL _printTableIDs = FALSE;
+
+BYTE _uniqueTableIDs[0x100];
+BYTE _uniqueTableIDCount = 0;
+
 int main(int argc, char* argv[])
 {
 	if (argc < 2)
 	{
-		printf("Usage: TSNowAndNextChanges.exe [-events|-packets] <filename.ts>\n");
+		printf("Usage: TSNowAndNext.exe [-events|-print[:option1[:option2[:...]]]] <filename.ts>\n");
 		printf("   -events  : Lists the changes of event through the entire file\n");
-		printf("   -packets : Prints details about significant packets in the file\n");
+		printf("   -print : Prints details about packets in the file\n");
+		printf("         :AF : Prints Adaption Field info\n");
+		printf("         :PES : Prints PES packets\n");
+		printf("         :TableIDs : Prints the Table IDs found\n");
 		printf(" If neither of these options are specified then\n");
 		printf(" filename.ts.Xcl will be created.\n");
 		return 0;
@@ -50,19 +60,50 @@ int main(int argc, char* argv[])
 
 	BOOL printEvents = FALSE;
 	BOOL printPackets = FALSE;
+
 	for (int i = 1; i < argc - 1; i++)
 	{
 		if (_stricmp(argv[i], "-events") == 0)
 			printEvents = TRUE;
-		if (_stricmp(argv[i], "-packets") == 0)
+		if (_stricmp(argv[i], "-print") == 0)
 			printPackets = TRUE;
+		if (strncmp(argv[i], "-print:", 7) == 0)
+		{
+			printPackets = TRUE;
+			_printAF = FALSE;
+
+			char* curr = argv[i] + 6;
+			while (TRUE)
+			{
+				if (_strnicmp(curr, ":AF", 3) == 0)
+				{
+					_printAF = TRUE;
+					curr += 3;
+				}
+				else if (_strnicmp(curr, ":PES", 4) == 0)
+				{
+					_printPES = TRUE;
+					curr += 4;
+				}
+				else if (_strnicmp(curr, ":TableIDs", 9) == 0)
+				{
+					_printTableIDs = TRUE;
+					curr += 9;
+				}
+				else
+					break;
+			}
+		}
+
 	}
 	char* filename = argv[argc - 1];
 	
 #ifdef _DEBUG
+	//printEvents = TRUE;
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChange.ts";
-	printEvents = TRUE;
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChangeOrig.ts";
+	//filename = "D:\\TV\\Samples\\(2007-06-10 19-25) Lost Worlds (test seeking).ts";
+	//filename = "D:\\TV\\Samples\\(2007-09-29 12-10) AFL grand final.ts";
 #endif
 
 	printf("TSNowAndNext - written by Nate\n\n");
@@ -141,7 +182,7 @@ void PrintPackets(HANDLE file, LONGLONG fileOffset, LONGLONG fileLength)
 		fileLengthLeft -= bytesRead;
 		bytesToRead = (fileLengthLeft < READ_SIZE) ? (DWORD)fileLengthLeft : READ_SIZE;
 		if (bytesToRead <= 0)
-			return;
+			break;
 
 		bytesleft -= bytesProcessed;
 		if (bytesleft < 0)
@@ -159,7 +200,19 @@ void PrintPackets(HANDLE file, LONGLONG fileOffset, LONGLONG fileLength)
 			MyReadFile(file, pStartFrame, bytesToRead, &bytesRead, NULL);
 		}
 	}
-	if (bytesRead <= 0)
+
+	if (_printTableIDs)
+	{
+		char line[1000];
+		sprintf((char*)&line, "Unique Table IDs\n");
+		for (int uniqueIndex = 0; uniqueIndex < _uniqueTableIDCount; uniqueIndex++)
+		{
+			sprintf((char*)&line, "%s0x%.2x\n", &line, _uniqueTableIDs[uniqueIndex]);
+		}
+		printf("%s", &line);
+	}
+
+	if ((bytesToRead > 0) && (bytesRead <= 0))
 		printf("End of file reached\n");
 }
 
@@ -477,7 +530,7 @@ void ListNowAndNext(HANDLE file)
 
 		BOOL print = FALSE;
 		if (event_list->running_event != NULL) // Now
-		{
+			{
 			if (FALSE) // some debugging code to show packets missing short_event_descriptors
 			{
 				if (event_list->running_event->short_event_descriptor == NULL)
@@ -874,7 +927,7 @@ BOOL ProcessTSPacket(transport_packet* tsHeader, LONGLONG currPos)
 
 	sprintfGeneralInfo((char*)&line, tsHeader);
 
-	if (tsHeader->HasAdaptionField)
+	if (_printAF && tsHeader->HasAdaptionField)
 	{
 		if (tsHeader->adaption_field.adaption_field_length > 0)
 		{
@@ -912,6 +965,8 @@ BOOL ProcessTSPacket(transport_packet* tsHeader, LONGLONG currPos)
 						tsHeader->adaption_field.original_program_clock_reference_extention
 						);
 			}
+			printf("%s\n", (char*)&line);
+			return TRUE;
 		}
 	}
 
@@ -938,12 +993,6 @@ BOOL ProcessTSPacket(transport_packet* tsHeader, LONGLONG currPos)
 		}
 	}
 
-	if (tsHeader->adaption_field.adaption_field_length > 0)
-	{
-		//return TRUE;
-		printf("%s\n", (char*)&line);
-	}
-
 	//if (tsHeader->payload_unit_start_indicator)
 	//if ((tsHeader->PID == 0x503) && (tsHeader->PID <= 0x1000))
 	//if (tsHeader->PID == 0x12)
@@ -952,10 +1001,27 @@ BOOL ProcessTSPacket(transport_packet* tsHeader, LONGLONG currPos)
 
 	if (tsHeader->payload_unit_start_indicator == 1)
 	{
-		//printf("%s ", (char*)&line);
+		//if (_printPayloadStart)
+		//	printf("%s ", (char*)&line);
 
 		if (tsHeader->IsPES == FALSE)
 		{
+			if (_printTableIDs)
+			{
+				sprintf((char*)&line, "%s Table Id = 0x%.2x", line, tsHeader->table.table_id);
+				printf("%s\n", line);
+
+				int uniqueIndex = 0;
+				for (; uniqueIndex < _uniqueTableIDCount; uniqueIndex++)
+				{
+					if (_uniqueTableIDs[uniqueIndex] == tsHeader->table.table_id)
+						break;
+				}
+				if (uniqueIndex == _uniqueTableIDCount)
+				{
+					_uniqueTableIDs[_uniqueTableIDCount++] = tsHeader->table.table_id;
+				}
+			}
 			//switch (tsHeader->table.table_id)
 			//{
 			//case 0x00:
@@ -1017,18 +1083,15 @@ BOOL ProcessTSPacket(transport_packet* tsHeader, LONGLONG currPos)
 		}
 		else
 		{
-			return TRUE;
-			//sprintf((char*)&line, "%s PES %.2x %.2x %.2x %.2x %.2x %.2x", line,
-			//	tsHeader->payload[0],
-			//	tsHeader->payload[1],
-			//	tsHeader->payload[2],
-			//	tsHeader->payload[3],
-			//	tsHeader->payload[4],
-			//	tsHeader->payload[5]
-			//	);
+			if (_printPES)
+			{
+				char* byteString = sprintToString(tsHeader->packet_bytes + tsHeader->payload_offset, 188 - tsHeader->payload_offset);
+				sprintf((char*)&line, "%s PES\n%s", line, byteString);
+				free(byteString);
+				printf("%s\n", line);
+			}
 		}
 
-		printf("%s\n", line);
 		return TRUE;
 	}
 	
