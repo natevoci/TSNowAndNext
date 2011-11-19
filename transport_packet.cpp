@@ -589,6 +589,7 @@ eit_event_list* ParseEITEvents(eit_table *pEITTable)
 				}
 				break;
 			case 0x4E: // extended_event_descriptor
+			case 0x50: // component_descriptor
 			case 0x54: // content_descriptor
 			case 0x55: // parental_rating_descriptor
 			case 0x76: // content_identifier_descriptor

@@ -200,7 +200,7 @@ struct eit_table
 	BYTE segment_last_section_number;
 	BYTE last_table_id;
 	BYTE *events;
-	BYTE events_length;
+	SHORT events_length;
 };
 
 struct short_event_descriptor

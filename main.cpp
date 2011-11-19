@@ -104,6 +104,7 @@ int main(int argc, char* argv[])
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChangeOrig.ts";
 	//filename = "D:\\TV\\Samples\\(2007-06-10 19-25) Lost Worlds (test seeking).ts";
 	//filename = "D:\\TV\\Samples\\(2007-09-29 12-10) AFL grand final.ts";
+	//filename = "D:\\TV\\Samples\\EPGTest01.ts";
 #endif
 
 	printf("TSNowAndNext - written by Nate\n\n");
@@ -510,6 +511,7 @@ void ListNowAndNext(HANDLE file)
 	DWORD readSize = 0x2000000;
 	
 	LONGLONG fileOffset = patPacket->FileOffset;
+	LONGLONG lastNowFileOffset = fileOffset;
 
 	while (fileOffset < fileLength)
 	{
@@ -518,7 +520,7 @@ void ListNowAndNext(HANDLE file)
 
 		if (eitPacket == NULL)
 		{
-			printf("No EIT within 0x%.8x bytes\n", readSize);
+			printf("No EIT within %u bytes @ %llu\n", readSize, fileOffset);
 			fileOffset += readSize - 188;
 			continue;
 		}
@@ -530,7 +532,15 @@ void ListNowAndNext(HANDLE file)
 
 		BOOL print = FALSE;
 		if (event_list->running_event != NULL) // Now
+		{
+			LONGLONG lastNowGap = eitPacket->FileOffset - lastNowFileOffset;
+			DWORD showGapThreshold = (readSize * 2);
+			if (lastNowGap > showGapThreshold)
 			{
+				printf("No Now EIT for %llu bytes @ %llu\n", lastNowGap, fileOffset);
+			}
+			lastNowFileOffset = eitPacket->FileOffset;
+
 			if (FALSE) // some debugging code to show packets missing short_event_descriptors
 			{
 				if (event_list->running_event->short_event_descriptor == NULL)
