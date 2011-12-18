@@ -35,6 +35,8 @@ SHORT _patVersion = -1;
 transport_packet* _patPacket;
 transport_packet* _pmtPackets[0x2000];
 
+float _testPositionFilePercentage = -1.0f;
+
 BOOL _printAF = FALSE;
 BOOL _printPES = FALSE;
 BOOL _printTableIDs = FALSE;
@@ -46,13 +48,17 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2)
 	{
-		printf("Usage: TSNowAndNext.exe [-events|-print[:option1[:option2[:...]]]] <filename.ts>\n");
+		printf("Usage: TSNowAndNext.exe [-percentage[nn]] <filename.ts>\n");
+		printf("   -percentage : Use the epg data from a certain percentage into the file\n");
+		printf("   -percentage:<nn> : Use a percentage value from 0 to 99\n");
+		printf("\n");
+		printf("Debugging options [-events|-print[:opt1[:opt2[:...]]]]\n");
 		printf("   -events  : Lists the changes of event through the entire file\n");
 		printf("   -print : Prints details about packets in the file\n");
 		printf("         :AF : Prints Adaption Field info\n");
 		printf("         :PES : Prints PES packets\n");
 		printf("         :TableIDs : Prints the Table IDs found\n");
-		printf(" If neither of these options are specified then\n");
+		printf(" If none of the debugging options are specified then\n");
 		printf(" filename.ts.Xcl will be created.\n");
 		return 0;
 	}
@@ -63,11 +69,19 @@ int main(int argc, char* argv[])
 
 	for (int i = 1; i < argc - 1; i++)
 	{
-		if (_stricmp(argv[i], "-events") == 0)
+		if (_stricmp(argv[i], "-percentage") == 0)
+			_testPositionFilePercentage = 0.35f;
+		else if (strncmp(argv[i], "-percentage:", 12) == 0)
+		{
+			char* curr = argv[i] + 12;
+			_testPositionFilePercentage = (float)atof(curr);
+			_testPositionFilePercentage /= 100.0f;
+		}
+		else if (_stricmp(argv[i], "-events") == 0)
 			printEvents = TRUE;
-		if (_stricmp(argv[i], "-print") == 0)
+		else if (_stricmp(argv[i], "-print") == 0)
 			printPackets = TRUE;
-		if (strncmp(argv[i], "-print:", 7) == 0)
+		else if (strncmp(argv[i], "-print:", 7) == 0)
 		{
 			printPackets = TRUE;
 			_printAF = FALSE;
@@ -103,8 +117,13 @@ int main(int argc, char* argv[])
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChange.ts";
 	//filename = "D:\\TV\\Samples\\TENSampleTsMuxEPGChangeOrig.ts";
 	//filename = "D:\\TV\\Samples\\(2007-06-10 19-25) Lost Worlds (test seeking).ts";
-	//filename = "D:\\TV\\Samples\\(2007-09-29 12-10) AFL grand final.ts";
+	//filename = "D:\\TV\\Samples\\(2007-09-29 12-10) AFL grand final_cut.ts";
 	//filename = "D:\\TV\\Samples\\EPGTest01.ts";
+	//filename = "Z:\\TV\\Star Trek\\(2011-11-17 20-25) Star Trek- Next Generation - 3x01 - Evolution.ts";
+	//_testPositionFilePercentage = 0.35f;
+
+	//printPackets = TRUE;
+	//_printAF = TRUE;
 #endif
 
 	printf("TSNowAndNext - written by Nate\n\n");
@@ -124,11 +143,17 @@ int main(int argc, char* argv[])
 		}
 		else if (printPackets == TRUE)
 		{
-			PrintPackets(f, 0, 0x100000);
+			PrintPackets(f, 0, 0x1000000);
 			printf("%i size errors\n%i packets with the error bit set\n%i continuity errors\n", sizeErrors, badPackets, continuityErrors);
+		}
+		else if (_testPositionFilePercentage >= 0.0f)
+		{
+			ProcessNowAndNext(f, filename);
 		}
 		else
 		{
+			// TODO: Replace this with a method that detects based on partial matching with the filename.
+			_testPositionFilePercentage = 0.35f;
 			ProcessNowAndNext(f, filename);
 		}
 		CloseHandle(f);
@@ -144,7 +169,12 @@ int main(int argc, char* argv[])
 
 void PrintPackets(HANDLE file, LONGLONG fileOffset, LONGLONG fileLength)
 {
-	DWORD dw = setFilePointer(file, fileOffset, FILE_BEGIN);
+	LONGLONG newOffset = setFilePointer(file, fileOffset, FILE_BEGIN);
+	if (newOffset == -1LL)
+	{
+		printf("Failed to seek in file\n");
+		return;
+	}
 
 	BYTE buff[READ_SIZE + 188];
 	memset((void*)&_lastSeq, 0xff, 0x2000);
@@ -219,8 +249,6 @@ void PrintPackets(HANDLE file, LONGLONG fileOffset, LONGLONG fileLength)
 
 void ProcessNowAndNext(HANDLE file, char* filename)
 {
-	const float testPositionFilePercentage = 0.35f;
-
 	transport_packet* patPacket = ReadSection(file, 0, 0x100000, 0x00, 0x00);
 	transport_packet* pmtPacket = NULL;
 	transport_packet* pcrPacket = NULL;
@@ -285,7 +313,7 @@ void ProcessNowAndNext(HANDLE file, char* filename)
 
 	printf("File Length %13llu\n", fileLength);
 
-	LONGLONG testPositionFileOffset = (LONGLONG)(fileLength * testPositionFilePercentage);
+	LONGLONG testPositionFileOffset = (LONGLONG)(fileLength * _testPositionFilePercentage);
 	WORD event_id_of_show = 0;
 	eit_event_list* event_list = NULL;
 
@@ -662,7 +690,11 @@ transport_packet* ReadPacket(HANDLE file, LONGLONG fileOffset, LONGLONG fileLeng
 {
 	transport_packet* result = NULL;
 
-	DWORD dw = setFilePointer(file, fileOffset, FILE_BEGIN);
+	LONGLONG newOffset = setFilePointer(file, fileOffset, FILE_BEGIN);
+	if (newOffset == -1LL)
+	{
+		printf("Failed to seek in file\n");
+	}
 	
 	BYTE buff[READ_SIZE + 188];
 
@@ -738,7 +770,11 @@ transport_packet* ReadSection(HANDLE file, LONGLONG fileOffset, LONGLONG fileLen
 {
 	transport_packet* result = NULL;
 
-	DWORD dw = setFilePointer(file, fileOffset, FILE_BEGIN);
+	LONGLONG newOffset = setFilePointer(file, fileOffset, FILE_BEGIN);
+	if (newOffset == -1LL)
+	{
+		printf("Failed to seek in file\n");
+	}
 
 	BYTE buff[READ_SIZE + 188];
 

@@ -76,11 +76,14 @@ void MyReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWO
 	ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
 }
 
-DWORD setFilePointer(HANDLE file, LONGLONG llDistanceToMove, DWORD dwMoveMethod)
+LONGLONG setFilePointer(HANDLE file, LONGLONG llDistanceToMove, DWORD dwMoveMethod)
 {
 	LARGE_INTEGER li;
 	li.QuadPart = llDistanceToMove;
-	return SetFilePointer(file, li.LowPart, &li.HighPart, dwMoveMethod);
+	li.LowPart = SetFilePointer(file, li.LowPart, &li.HighPart, dwMoveMethod);
+	if (li.LowPart == (DWORD)-1)
+		return -1LL;
+	li.QuadPart;
 }
 
 LONGLONG getFileSize(HANDLE file)

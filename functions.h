@@ -14,7 +14,7 @@ char* sprintToString(BYTE* pCurr, int count);
 void Mymemcpy(void *dest, const void*src, size_t length);
 void MyReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
 
-DWORD setFilePointer(HANDLE file, LONGLONG llDistanceToMove, DWORD dwMoveMethod);
+LONGLONG setFilePointer(HANDLE file, LONGLONG llDistanceToMove, DWORD dwMoveMethod);
 LONGLONG getFileSize(HANDLE file);
 
 #endif
